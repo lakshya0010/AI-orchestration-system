@@ -1,0 +1,30 @@
+
+# Environment
+.env
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Alembic
+# (keep migration files tracked, but ignore any local db files if you
+# ever end up testing against sqlite)
+*.db
+*.sqlite3
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
