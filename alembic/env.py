@@ -9,7 +9,8 @@ from alembic import context
 from app.database import Base
 from app.config import settings
 from app.models.session import Session          # noqa: F401
-from app.models.agent_step import AgentStep      # noqa: F401
+from app.models.agent_step import AgentStep     # noqa: F401
+from app.models.memory_entry import MemoryEntry      # noqa: F401
 
 config = context.config
 

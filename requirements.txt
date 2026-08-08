@@ -8,3 +8,5 @@ pydantic
 pydantic-settings
 python-dotenv
 groq
+pgvector
+sentence-transformers
