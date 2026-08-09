@@ -8,6 +8,8 @@ from app.services.llm import call_llm
 from app.models.memory_entry import MemoryEntry
 from app.services.embeddings import get_embedding
 from sqlalchemy import select
+from fastapi import BackgroundTasks
+from app.services.orchestrator import run_orchestrator
 
 router = APIRouter()
 
@@ -21,6 +23,7 @@ async def get_relevent_memory(db: DBSession, query_text:str)->str | None:
 
 @router.post("", response_model=SessionResponse)
 async def create_session(
+    background_tasks: BackgroundTasks,
     payload: SessionCreate,
     db: DBSession = Depends(get_db),
 ):
@@ -29,33 +32,7 @@ async def create_session(
     await db.commit()
     await db.refresh(new_session)
 
-    memory_context = await get_relevent_memory(db, payload.goal)
-    prompt = payload.goal
-    if memory_context:
-        prompt = f"Relevant past context: {memory_context}\n\nCurrent goal: {payload.goal}"
-
-    result_text = await call_llm(prompt)
-
-    step = AgentStep(
-        session_id = new_session.id,
-        role = AgentRole.EXECUTOR,
-        step_number = 1,
-        input = {"goal": new_session.goal, "prompt_sent": prompt},
-        output = {"response":result_text},
-        status = StepStatus.COMPLETED,
-    )
-    db.add(step)
-
-    embedding_vector = await get_embedding(new_session.goal)
-    memory = MemoryEntry(
-        content=new_session.goal,
-        embedding=embedding_vector,
-    )
-    db.add(memory)
-
-    new_session.status = SessionStatus.DONE
-    await db.commit()
-    await db.refresh(new_session)
-
+    background_tasks.add_task(run_orchestrator, new_session.id)
+    
     return new_session
 
