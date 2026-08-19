@@ -10,6 +10,9 @@ from app.services.embeddings import get_embedding
 from sqlalchemy import select
 from fastapi import BackgroundTasks
 from app.services.orchestrator import run_orchestrator
+from sqlalchemy.orm import selectinload
+import uuid
+from fastapi import HTTPException
 
 router = APIRouter()
 
@@ -36,3 +39,34 @@ async def create_session(
     
     return new_session
 
+
+@router.get("/{session_id}")
+async def get_session(session_id: uuid.UUID, db:DBSession = Depends(get_db)):
+    result = await db.execute(
+        select(Session).where(Session.id == session_id)
+    )
+    session = result.scalar_one_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="session not found")
+
+    steps_result = await db.execute(
+        select(AgentStep).where(AgentStep.session_id == session_id)
+        .order_by(AgentStep.step_number)
+    )
+    steps = steps_result.scalars().all()
+
+    return{
+        "id":session.id,
+        "goal":session.goal,
+        "status":session.status,
+        "steps":[
+            {
+                "step_number":s.step_number,
+                "role":s.role.value,
+                "input":s.input,
+                "output":s.output,
+                "status":s.status.value,
+            }
+            for s in steps
+        ],
+    }

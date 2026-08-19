@@ -4,30 +4,65 @@ from app.database import AsyncSessionLocal
 from app.models.session import Session, SessionStatus
 from app.models.agent_step import AgentStep, AgentRole, StepStatus
 from app.services.agents import run_critic, run_executor, run_planner
+from app.services.embeddings import get_embedding
+from app.models.memory_entry import MemoryEntry
 
 MAX_REPLANS = 3
 
-async def run_orchestrator(session_id: uuid.UUID):
+async def get_relevent_memory(db, query_text: str) ->str|None:
+    query_embedding = await get_embedding(query_text)
+    result = await db.execute(
+        select(MemoryEntry, MemoryEntry.embedding.cosine_distance(query_embedding).label("distance"))
+        .order_by("distance")
+        .limit(1)
+    )
+    row = result.first()
+    if row is None:
+        return None
+    match, distance = row
+    if distance>0.6:
+        return None
+    
+    return match.content
+
+
+
+async def run_orchestrator(session_id: uuid.UUID) -> str|None:
     async with AsyncSessionLocal() as db:
         try:
             result = await db.execute(select(Session).where(Session.id == session_id))
             session = result.scalar_one()
 
+            memory_context = await get_relevent_memory(db, session.goal)
+
             replan_count = 0
             step_number = 1
+            feedback = None
 
             while True:
                 session.status = SessionStatus.PLANNING
                 await db.commit()
 
-                plan_text = await run_planner(session.goal)
+                plan_prompt = session.goal
+                if memory_context:
+                    plan_prompt = f"Relevant past context: {memory_context}\n\nGoal: {session.goal}"
+                if feedback:
+                    plan_prompt += (
+                        f"\n\nYour previous plan was:\n{plan_text}\n\n"
+                        f"Step '{rejected_step}' failed with reason: {rejected_feedback}\n"
+                        f"Generate a new COMPLETE plan from the start that avoids this issue. "
+                        f"Do not reference the previous plan — return only the new full numbered list."
+                    )
+                
+
+                plan_text = await run_planner(plan_prompt)
                 steps = [s.strip() for s in plan_text.split("\n") if s.strip()]
 
-                await _save_step(db, session.id, AgentRole.PLANNER, step_number, {"goal":session.goal}, {"plan":plan_text})
-
+                await _save_step(db, session.id, AgentRole.PLANNER, step_number, {"prompt_sent":plan_prompt}, {"plan":plan_text})
                 step_number+=1
 
-                all_approved = True
+                rejected_step = None
+                rejected_feedback = None
 
                 for step in steps:
                     session.status = SessionStatus.EXECUTING
@@ -46,13 +81,19 @@ async def run_orchestrator(session_id: uuid.UUID):
                     step_number+=1
 
                     if not approved:
-                        all_approved = False
+                        rejected_step = step
+                        rejected_feedback = verdict
                         break
 
-                if all_approved:
+                if rejected_step is None:
+                    memory = MemoryEntry(
+                        content = session.goal,
+                        embedding =await get_embedding(session.goal),
+                    )
+                    db.add(memory)
                     session.status = SessionStatus.DONE
                     await db.commit()
-                    return
+                    return 
 
                 replan_count+=1
                 if replan_count>MAX_REPLANS:
@@ -60,8 +101,10 @@ async def run_orchestrator(session_id: uuid.UUID):
                     await db.commit()
                     return
 
+                feedback = f"Step '{rejected_step}' was rejected: {rejected_feedback}"
                 session.status = SessionStatus.REPLANNING
                 await db.commit()
+
         except Exception as e:
             session.status = SessionStatus.FAILED
             await db.commit()

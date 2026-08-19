@@ -10,7 +10,7 @@ from app.config import settings
 class Base(DeclarativeBase):
     pass
 
-engine = create_async_engine(settings.DATABASE_URL, echo = False)
+engine = create_async_engine(settings.DATABASE_URL, pool_pre_ping=True, echo = False)
 
 AsyncSessionLocal = async_sessionmaker(
     bind = engine,
