@@ -16,14 +16,6 @@ from fastapi import HTTPException
 
 router = APIRouter()
 
-async def get_relevent_memory(db: DBSession, query_text:str)->str | None:
-    query_embedding = await get_embedding(query_text)
-    result = await db.execute(
-        select(MemoryEntry).order_by(MemoryEntry.embedding.cosine_distance(query_embedding)).limit(1)
-    )
-    match = result.scalar_one_or_none()
-    return match.content if match else None
-
 @router.post("", response_model=SessionResponse)
 async def create_session(
     background_tasks: BackgroundTasks,
@@ -38,6 +30,26 @@ async def create_session(
     background_tasks.add_task(run_orchestrator, new_session.id)
     
     return new_session
+
+@router.post("/{session_id}/answer")
+async def answer_session(
+    session_id: uuid.UUID,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    db:DBSession = Depends(get_db),
+    ):
+    result = await db.execute(select(Session).where(Session.id == session_id))
+    session = result.scalar_one_or_none()
+    if session is None or session.status != SessionStatus.AWAITING_INPUT:
+        raise HTTPException(status_code=400, detail="session not awaiting input")
+
+    session.goal = f"{session.goal}\n\nAdditional info from user: {payload['answer']}"
+    session.status = SessionStatus.PLANNING
+    await db.commit()
+
+    background_tasks.add_task(run_orchestrator, session.id)
+    return {"status": "resumed"}
+    
 
 
 @router.get("/{session_id}")

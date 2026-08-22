@@ -13,6 +13,7 @@ class SessionStatus(str, enum.Enum):
     REPLANNING = "replanning"
     DONE = "done"
     FAILED = "failed"
+    AWAITING_INPUT = "awaiting_input"
 
 class Session(Base):
     __tablename__ = "sessions"

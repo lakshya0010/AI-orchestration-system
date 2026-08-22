@@ -56,6 +56,21 @@ async def run_orchestrator(session_id: uuid.UUID) -> str|None:
                 
 
                 plan_text = await run_planner(plan_prompt)
+
+                if plan_text.strip().startswith("CLARIFY:"):
+                    question = plan_text.split("CLARIFY:", 1)[1].strip()
+                    session.status = SessionStatus.AWAITING_INPUT
+                    await db.commit()
+                    await _save_step(db, session.id, AgentRole.PLANNER, step_number, {"prompt_sent":plan_prompt}, {"question": question})
+                    return
+
+                if plan_text.strip().startswith("OUT_OF_SCOPE:"):
+                    reason = plan_text.split("OUT_OF_SCOPE:", 1)[1].strip()
+                    session.status = SessionStatus.FAILED
+                    await db.commit()
+                    await _save_step(db, session.id, AgentRole.PLANNER, step_number, {"prompt_sent":plan_prompt}, {"reason":reason})
+                    return
+                    
                 steps = [s.strip() for s in plan_text.split("\n") if s.strip()]
 
                 await _save_step(db, session.id, AgentRole.PLANNER, step_number, {"prompt_sent":plan_prompt}, {"plan":plan_text})
